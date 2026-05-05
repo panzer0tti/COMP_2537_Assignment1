@@ -18,19 +18,6 @@ let userCollection;
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
-app.use(session({
-  secret: process.env.NODE_SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: mongoUri,
-    dbName: process.env.MONGODB_DATABASE,
-    collectionName: 'sessions',
-    crypto: { secret: process.env.MONGODB_SESSION_SECRET }
-  }),
-  cookie: { maxAge: 60 * 60 * 1000 }
-}));
-
 app.get('/', (req, res) => {
   if (req.session.authenticated) {
     res.send(`
@@ -91,18 +78,13 @@ app.post('/signupSubmit', async (req, res) => {
 
   const hashedPassword = await bcrypt.hash(password, saltRounds);
   await userCollection.insertOne({ name, email, password: hashedPassword });
-  console.log('User inserted:', email);
 
   req.session.authenticated = true;
   req.session.name = name;
   req.session.email = email;
 
   req.session.save((err) => {
-    if (err) {
-      console.error('Session save error on signup:', err);
-      return res.send('Session error: ' + err.message);
-    }
-    console.log('Session saved, redirecting to /members');
+    if (err) console.error('Session save error:', err);
     res.redirect('/members');
   });
 });
@@ -123,8 +105,6 @@ app.get('/login', (req, res) => {
 app.post('/loginSubmit', async (req, res) => {
   const { email, password } = req.body;
 
-  console.log('Login attempt for:', email);
-
   const schema = Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().max(20).required()
@@ -132,7 +112,6 @@ app.post('/loginSubmit', async (req, res) => {
 
   const { error } = schema.validate({ email, password });
   if (error) {
-    console.log('Joi validation failed:', error.details[0].message);
     return res.send(`
       <!DOCTYPE html><html><head><title>Error</title></head><body>
       <p>Invalid email/password combination.</p>
@@ -142,21 +121,7 @@ app.post('/loginSubmit', async (req, res) => {
   }
 
   const user = await userCollection.findOne({ email });
-  console.log('User found in DB:', user ? 'YES' : 'NO');
-
-  if (!user) {
-    return res.send(`
-      <!DOCTYPE html><html><head><title>Error</title></head><body>
-      <p>No user found with that email.</p>
-      <a href="/login">Try again</a>
-      </body></html>
-    `);
-  }
-
-  const passwordMatch = await bcrypt.compare(password, user.password);
-  console.log('Password match:', passwordMatch);
-
-  if (!passwordMatch) {
+  if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.send(`
       <!DOCTYPE html><html><head><title>Error</title></head><body>
       <p>Invalid email/password combination.</p>
@@ -170,17 +135,12 @@ app.post('/loginSubmit', async (req, res) => {
   req.session.email = user.email;
 
   req.session.save((err) => {
-    if (err) {
-      console.error('Session save error on login:', err);
-      return res.send('Session error: ' + err.message);
-    }
-    console.log('Login successful, session saved for:', user.name);
+    if (err) console.error('Session save error:', err);
     res.redirect('/members');
   });
 });
 
 app.get('/members', (req, res) => {
-  console.log('Members page - authenticated:', req.session.authenticated);
   if (!req.session.authenticated) {
     return res.redirect('/');
   }
@@ -213,9 +173,25 @@ app.use((req, res) => {
 async function startServer() {
   const client = new MongoClient(mongoUri);
   await client.connect();
+  console.log('Connected to MongoDB');
+
   const db = client.db(process.env.MONGODB_DATABASE);
   userCollection = db.collection('users');
-  console.log('Connected to MongoDB');
+
+  // Pass the existing connected client directly to avoid a second SSL handshake
+  app.use(session({
+    secret: process.env.NODE_SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({
+      client: client,
+      dbName: process.env.MONGODB_DATABASE,
+      collectionName: 'sessions',
+      crypto: { secret: process.env.MONGODB_SESSION_SECRET }
+    }),
+    cookie: { maxAge: 60 * 60 * 1000 }
+  }));
+
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
