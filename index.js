@@ -15,11 +15,9 @@ const mongoUri = `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGOD
 
 let userCollection;
 
-// Middleware
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
-// Session - registered before routes
 app.use(session({
   secret: process.env.NODE_SESSION_SECRET,
   resave: false,
@@ -30,10 +28,9 @@ app.use(session({
     collectionName: 'sessions',
     crypto: { secret: process.env.MONGODB_SESSION_SECRET }
   }),
-  cookie: { maxAge: 60 * 60 * 1000 } // 1 hour
+  cookie: { maxAge: 60 * 60 * 1000 }
 }));
 
-// Home
 app.get('/', (req, res) => {
   if (req.session.authenticated) {
     res.send(`
@@ -54,7 +51,6 @@ app.get('/', (req, res) => {
   }
 });
 
-// Sign up - GET
 app.get('/signup', (req, res) => {
   res.send(`
     <!DOCTYPE html><html><head><title>Sign Up</title></head><body>
@@ -69,7 +65,6 @@ app.get('/signup', (req, res) => {
   `);
 });
 
-// Sign up - POST
 app.post('/signupSubmit', async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -96,18 +91,22 @@ app.post('/signupSubmit', async (req, res) => {
 
   const hashedPassword = await bcrypt.hash(password, saltRounds);
   await userCollection.insertOne({ name, email, password: hashedPassword });
+  console.log('User inserted:', email);
 
   req.session.authenticated = true;
   req.session.name = name;
   req.session.email = email;
 
   req.session.save((err) => {
-    if (err) console.error('Session save error:', err);
+    if (err) {
+      console.error('Session save error on signup:', err);
+      return res.send('Session error: ' + err.message);
+    }
+    console.log('Session saved, redirecting to /members');
     res.redirect('/members');
   });
 });
 
-// Log in - GET
 app.get('/login', (req, res) => {
   res.send(`
     <!DOCTYPE html><html><head><title>Log In</title></head><body>
@@ -121,9 +120,10 @@ app.get('/login', (req, res) => {
   `);
 });
 
-// Log in - POST
 app.post('/loginSubmit', async (req, res) => {
   const { email, password } = req.body;
+
+  console.log('Login attempt for:', email);
 
   const schema = Joi.object({
     email: Joi.string().email().required(),
@@ -132,6 +132,7 @@ app.post('/loginSubmit', async (req, res) => {
 
   const { error } = schema.validate({ email, password });
   if (error) {
+    console.log('Joi validation failed:', error.details[0].message);
     return res.send(`
       <!DOCTYPE html><html><head><title>Error</title></head><body>
       <p>Invalid email/password combination.</p>
@@ -141,7 +142,21 @@ app.post('/loginSubmit', async (req, res) => {
   }
 
   const user = await userCollection.findOne({ email });
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  console.log('User found in DB:', user ? 'YES' : 'NO');
+
+  if (!user) {
+    return res.send(`
+      <!DOCTYPE html><html><head><title>Error</title></head><body>
+      <p>No user found with that email.</p>
+      <a href="/login">Try again</a>
+      </body></html>
+    `);
+  }
+
+  const passwordMatch = await bcrypt.compare(password, user.password);
+  console.log('Password match:', passwordMatch);
+
+  if (!passwordMatch) {
     return res.send(`
       <!DOCTYPE html><html><head><title>Error</title></head><body>
       <p>Invalid email/password combination.</p>
@@ -155,13 +170,17 @@ app.post('/loginSubmit', async (req, res) => {
   req.session.email = user.email;
 
   req.session.save((err) => {
-    if (err) console.error('Session save error:', err);
+    if (err) {
+      console.error('Session save error on login:', err);
+      return res.send('Session error: ' + err.message);
+    }
+    console.log('Login successful, session saved for:', user.name);
     res.redirect('/members');
   });
 });
 
-// Members - GET
 app.get('/members', (req, res) => {
+  console.log('Members page - authenticated:', req.session.authenticated);
   if (!req.session.authenticated) {
     return res.redirect('/');
   }
@@ -178,13 +197,11 @@ app.get('/members', (req, res) => {
   `);
 });
 
-// Log out
 app.get('/logout', (req, res) => {
   req.session.destroy();
   res.redirect('/');
 });
 
-// 404
 app.use((req, res) => {
   res.status(404).send(`
     <!DOCTYPE html><html><head><title>404</title></head><body>
@@ -193,7 +210,6 @@ app.use((req, res) => {
   `);
 });
 
-// Start server only after DB connects
 async function startServer() {
   const client = new MongoClient(mongoUri);
   await client.connect();
