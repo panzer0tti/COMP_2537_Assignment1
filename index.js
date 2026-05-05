@@ -178,7 +178,7 @@ async function startServer() {
       return res.redirect('/');
     }
 
-    const images = ['cat1.jpg', 'cat2.jpg', 'cat3.jpg'];
+    const images = ['fish1.jpg', 'fish2.jpg', 'fish3.png'];
     const randomImage = images[Math.floor(Math.random() * images.length)];
 
     res.send(`
