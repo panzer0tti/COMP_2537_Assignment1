@@ -15,15 +15,6 @@ const mongoUri = `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGOD
 
 let userCollection;
 
-async function connectDB() {
-  const client = new MongoClient(mongoUri);
-  await client.connect();
-  const db = client.db(process.env.MONGODB_DATABASE);
-  userCollection = db.collection('users');
-  console.log('Connected to MongoDB');
-}
-connectDB().catch(console.error);
-
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
@@ -37,9 +28,10 @@ app.use(session({
     collectionName: 'sessions',
     crypto: { secret: process.env.MONGODB_SESSION_SECRET }
   }),
-  cookie: { maxAge: 60 * 60 * 1000 } // 1 hour
+  cookie: { maxAge: 60 * 60 * 1000 }
 }));
 
+// Home
 app.get('/', (req, res) => {
   if (req.session.user) {
     res.send(`
@@ -150,12 +142,13 @@ app.post('/loginSubmit', async (req, res) => {
   res.redirect('/members');
 });
 
+// Members - GET
 app.get('/members', (req, res) => {
   if (!req.session.user) {
     return res.redirect('/');
   }
 
-  const images = ['fish1.jpg', 'fish2.jpg', 'fish3.png'];
+  const images = ['cat1.jpg', 'cat2.jpg', 'cat3.jpg'];
   const randomImage = images[Math.floor(Math.random() * images.length)];
 
   res.send(`
@@ -180,4 +173,16 @@ app.use((req, res) => {
   `);
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+async function startServer() {
+  const client = new MongoClient(mongoUri);
+  await client.connect();
+  const db = client.db(process.env.MONGODB_DATABASE);
+  userCollection = db.collection('users');
+  console.log('Connected to MongoDB');
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+startServer().catch(err => {
+  console.error('Failed to start:', err);
+  process.exit(1);
+});
