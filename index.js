@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
+const MongoStore = require('connect-mongo')(session);
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcrypt');
 const Joi = require('joi');
@@ -19,29 +19,28 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
 async function startServer() {
-  // Connect to MongoDB first
-  const client = new MongoClient(mongoUri);
+  const client = new MongoClient(mongoUri, { useUnifiedTopology: true });
   await client.connect();
   console.log('Connected to MongoDB');
 
   const db = client.db(process.env.MONGODB_DATABASE);
   userCollection = db.collection('users');
 
-  // Pass the already-connected client to MongoStore
   app.use(session({
     secret: process.env.NODE_SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({
-      client: client,
+    store: new MongoStore({
+      mongooseConnection: null,
+      clientPromise: Promise.resolve(client),
       dbName: process.env.MONGODB_DATABASE,
       collectionName: 'sessions',
-      crypto: { secret: process.env.MONGODB_SESSION_SECRET }
+      secret: process.env.MONGODB_SESSION_SECRET,
+      ttl: 60 * 60 // 1 hour in seconds
     }),
     cookie: { maxAge: 60 * 60 * 1000 }
   }));
 
-  // Routes must be registered AFTER session middleware
   app.get('/', (req, res) => {
     if (req.session.authenticated) {
       res.send(`
