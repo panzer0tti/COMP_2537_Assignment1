@@ -36,9 +36,11 @@ async function startServer() {
       dbName: process.env.MONGODB_DATABASE,
       collectionName: 'sessions',
       secret: process.env.MONGODB_SESSION_SECRET,
-      ttl: 60 * 60 // 1 hour in seconds
+      ttl: 60 * 60
     }),
+
     cookie: { maxAge: 60 * 60 * 1000 }
+    
   }));
 
   app.get('/', (req, res) => {
