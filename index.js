@@ -15,9 +15,11 @@ const mongoUri = `mongodb+srv://${process.env.MONGODB_USER}:${process.env.MONGOD
 
 let userCollection;
 
+// Middleware
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
+// Session - registered before routes
 app.use(session({
   secret: process.env.NODE_SESSION_SECRET,
   resave: false,
@@ -28,15 +30,15 @@ app.use(session({
     collectionName: 'sessions',
     crypto: { secret: process.env.MONGODB_SESSION_SECRET }
   }),
-  cookie: { maxAge: 60 * 60 * 1000 }
+  cookie: { maxAge: 60 * 60 * 1000 } // 1 hour
 }));
 
 // Home
 app.get('/', (req, res) => {
-  if (req.session.user) {
+  if (req.session.authenticated) {
     res.send(`
       <!DOCTYPE html><html><head><title>Home</title></head><body>
-      <h1>Hello, ${req.session.user.name}!</h1>
+      <h1>Hello, ${req.session.name}!</h1>
       <a href="/members"><button>Go to Members Area</button></a><br><br>
       <a href="/logout"><button>Logout</button></a>
       </body></html>
@@ -52,6 +54,7 @@ app.get('/', (req, res) => {
   }
 });
 
+// Sign up - GET
 app.get('/signup', (req, res) => {
   res.send(`
     <!DOCTYPE html><html><head><title>Sign Up</title></head><body>
@@ -66,6 +69,7 @@ app.get('/signup', (req, res) => {
   `);
 });
 
+// Sign up - POST
 app.post('/signupSubmit', async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -93,10 +97,17 @@ app.post('/signupSubmit', async (req, res) => {
   const hashedPassword = await bcrypt.hash(password, saltRounds);
   await userCollection.insertOne({ name, email, password: hashedPassword });
 
-  req.session.user = { name, email };
-  res.redirect('/members');
+  req.session.authenticated = true;
+  req.session.name = name;
+  req.session.email = email;
+
+  req.session.save((err) => {
+    if (err) console.error('Session save error:', err);
+    res.redirect('/members');
+  });
 });
 
+// Log in - GET
 app.get('/login', (req, res) => {
   res.send(`
     <!DOCTYPE html><html><head><title>Log In</title></head><body>
@@ -110,6 +121,7 @@ app.get('/login', (req, res) => {
   `);
 });
 
+// Log in - POST
 app.post('/loginSubmit', async (req, res) => {
   const { email, password } = req.body;
 
@@ -138,13 +150,19 @@ app.post('/loginSubmit', async (req, res) => {
     `);
   }
 
-  req.session.user = { name: user.name, email: user.email };
-  res.redirect('/members');
+  req.session.authenticated = true;
+  req.session.name = user.name;
+  req.session.email = user.email;
+
+  req.session.save((err) => {
+    if (err) console.error('Session save error:', err);
+    res.redirect('/members');
+  });
 });
 
 // Members - GET
 app.get('/members', (req, res) => {
-  if (!req.session.user) {
+  if (!req.session.authenticated) {
     return res.redirect('/');
   }
 
@@ -153,18 +171,20 @@ app.get('/members', (req, res) => {
 
   res.send(`
     <!DOCTYPE html><html><head><title>Members</title></head><body>
-    <h1>Hello, ${req.session.user.name}.</h1>
+    <h1>Hello, ${req.session.name}.</h1>
     <img src="/${randomImage}" style="max-width:300px"><br><br>
     <a href="/logout"><button>Sign out</button></a>
     </body></html>
   `);
 });
 
+// Log out
 app.get('/logout', (req, res) => {
   req.session.destroy();
   res.redirect('/');
 });
 
+// 404
 app.use((req, res) => {
   res.status(404).send(`
     <!DOCTYPE html><html><head><title>404</title></head><body>
@@ -173,6 +193,7 @@ app.use((req, res) => {
   `);
 });
 
+// Start server only after DB connects
 async function startServer() {
   const client = new MongoClient(mongoUri);
   await client.connect();
